@@ -115,6 +115,7 @@ async fn portal_task(mut cmd_rx: mpsc::UnboundedReceiver<PortalCommand>, app: Ap
             while let Some(cmd) = cmd_rx.recv().await {
                 match cmd {
                     PortalCommand::Register { response, .. }
+                    | PortalCommand::RegisterBatch { response, .. }
                     | PortalCommand::Unregister { response, .. } => {
                         let _ = response.send(Err(format!("Portal unavailable: {}", e)));
                     }
@@ -132,6 +133,7 @@ async fn portal_task(mut cmd_rx: mpsc::UnboundedReceiver<PortalCommand>, app: Ap
             while let Some(cmd) = cmd_rx.recv().await {
                 match cmd {
                     PortalCommand::Register { response, .. }
+                    | PortalCommand::RegisterBatch { response, .. }
                     | PortalCommand::Unregister { response, .. } => {
                         let _ = response.send(Err(format!("Session creation failed: {}", e)));
                     }
