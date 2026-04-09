@@ -290,9 +290,10 @@ pub fn init_shortcuts(app: &AppHandle) -> Result<(), String> {
     let user_settings = settings::load_or_create_app_settings(app);
 
     for (id, default_binding) in default_bindings {
-        if id == "cancel" {
-            continue;
-        }
+        // Unlike the other backends, we register cancel upfront rather than
+        // dynamically. Each bind_shortcuts call replaces the full set and
+        // triggers a compositor confirmation dialog, so we want to do it
+        // once at init rather than on every recording start/stop.
         if id == "transcribe_with_post_process" && !user_settings.post_process_enabled {
             continue;
         }
@@ -332,28 +333,15 @@ pub fn unregister_shortcut(app: &AppHandle, binding: ShortcutBinding) -> Result<
     state.unregister(&binding.id)
 }
 
-/// Register the cancel shortcut.
+/// Register the cancel shortcut (no-op for portal).
 ///
-/// Unlike the other backends the portal approach is stable enough to
-/// support dynamic cancel registration on Linux.
-pub fn register_cancel_shortcut(app: &AppHandle) {
-    if let Some(cancel_binding) = settings::get_settings(app).bindings.get("cancel").cloned() {
-        if let Some(state) = app.try_state::<PortalState>() {
-            if let Err(e) = state.register(&cancel_binding) {
-                error!("Failed to register cancel shortcut via portal: {}", e);
-            }
-        }
-    }
-}
+/// The portal backend registers cancel at init along with all other
+/// shortcuts. Dynamic registration is avoided because each
+/// bind_shortcuts call triggers a compositor confirmation dialog.
+pub fn register_cancel_shortcut(_app: &AppHandle) {}
 
-/// Unregister the cancel shortcut.
-pub fn unregister_cancel_shortcut(app: &AppHandle) {
-    if let Some(cancel_binding) = settings::get_settings(app).bindings.get("cancel").cloned() {
-        if let Some(state) = app.try_state::<PortalState>() {
-            let _ = state.unregister(&cancel_binding.id);
-        }
-    }
-}
+/// Unregister the cancel shortcut (no-op for portal).
+pub fn unregister_cancel_shortcut(_app: &AppHandle) {}
 
 /// Validate a shortcut string for the portal backend.
 ///
