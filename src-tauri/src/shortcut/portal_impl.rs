@@ -44,6 +44,10 @@ enum PortalCommand {
         binding: ShortcutBinding,
         response: std_mpsc::Sender<Result<(), String>>,
     },
+    RegisterBatch {
+        bindings: Vec<ShortcutBinding>,
+        response: std_mpsc::Sender<Result<(), String>>,
+    },
     Unregister {
         binding_id: String,
         response: std_mpsc::Sender<Result<(), String>>,
@@ -57,6 +61,18 @@ pub struct PortalState {
 }
 
 impl PortalState {
+    fn register_batch(&self, bindings: Vec<ShortcutBinding>) -> Result<(), String> {
+        let (tx, rx) = std_mpsc::channel();
+        self.command_tx
+            .send(PortalCommand::RegisterBatch {
+                bindings,
+                response: tx,
+            })
+            .map_err(|_| "Portal task is not running".to_string())?;
+        rx.recv()
+            .map_err(|_| "Failed to receive portal response".to_string())?
+    }
+
     fn register(&self, binding: &ShortcutBinding) -> Result<(), String> {
         let (tx, rx) = std_mpsc::channel();
         self.command_tx
@@ -154,6 +170,14 @@ async fn portal_task(mut cmd_rx: mpsc::UnboundedReceiver<PortalCommand>, app: Ap
                     PortalCommand::Register { binding, response } => {
                         debug!("Portal: registering shortcut '{}'", binding.id);
                         shortcuts.insert(binding.id.clone(), binding);
+                        let result = rebind_all(&proxy, &session, &shortcuts).await;
+                        let _ = response.send(result);
+                    }
+                    PortalCommand::RegisterBatch { bindings, response } => {
+                        debug!("Portal: registering {} shortcuts at once", bindings.len());
+                        for binding in bindings {
+                            shortcuts.insert(binding.id.clone(), binding);
+                        }
                         let result = rebind_all(&proxy, &session, &shortcuts).await;
                         let _ = response.send(result);
                     }
@@ -289,11 +313,11 @@ pub fn init_shortcuts(app: &AppHandle) -> Result<(), String> {
     let default_bindings = settings::get_default_settings().bindings;
     let user_settings = settings::load_or_create_app_settings(app);
 
+    // Collect all bindings upfront and register them in a single
+    // bind_shortcuts call. This avoids multiple compositor confirmation
+    // dialogs -- the user only sees one prompt for all shortcuts.
+    let mut initial_bindings = Vec::new();
     for (id, default_binding) in default_bindings {
-        // Unlike the other backends, we register cancel upfront rather than
-        // dynamically. Each bind_shortcuts call replaces the full set and
-        // triggers a compositor confirmation dialog, so we want to do it
-        // once at init rather than on every recording start/stop.
         if id == "transcribe_with_post_process" && !user_settings.post_process_enabled {
             continue;
         }
@@ -304,12 +328,11 @@ pub fn init_shortcuts(app: &AppHandle) -> Result<(), String> {
             .cloned()
             .unwrap_or(default_binding);
 
-        if let Err(e) = state.register(&binding) {
-            error!(
-                "Failed to register portal shortcut {} during init: {}",
-                id, e
-            );
-        }
+        initial_bindings.push(binding);
+    }
+
+    if let Err(e) = state.register_batch(initial_bindings) {
+        error!("Failed to register portal shortcuts during init: {}", e);
     }
 
     app.manage(state);
