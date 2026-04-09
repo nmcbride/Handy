@@ -270,16 +270,26 @@ async fn rebind_all(
 
 /// Convert Handy's shortcut format to the portal trigger format.
 ///
-/// Handy uses lowercase "ctrl+space", "alt+shift+a", etc.
-/// The portal follows a similar convention but we normalise macOS-isms
-/// that shouldn't appear on Linux anyway, just to be safe.
+/// Handy uses lowercase "ctrl+space", "alt+shift+a", etc. KDE's portal
+/// expects capitalised modifier names (Ctrl, Shift, Alt, Meta) and a
+/// capitalised key name. Passing lowercase "ctrl" causes KDE to log
+/// "Unknown modifier" and silently ignore the preferred trigger.
 fn to_portal_trigger(handy_format: &str) -> String {
     handy_format
         .split('+')
         .map(|part| match part.trim().to_lowercase().as_str() {
-            "option" => "alt".to_string(),
-            "command" | "cmd" => "super".to_string(),
-            other => other.to_string(),
+            "ctrl" | "control" => "Ctrl".to_string(),
+            "shift" => "Shift".to_string(),
+            "alt" | "option" => "Alt".to_string(),
+            "super" | "meta" | "command" | "cmd" => "Meta".to_string(),
+            other => {
+                // Capitalise the first letter of key names (space -> Space, etc.)
+                let mut chars = other.chars();
+                match chars.next() {
+                    Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+                    None => String::new(),
+                }
+            }
         })
         .collect::<Vec<_>>()
         .join("+")
@@ -315,9 +325,12 @@ pub fn init_shortcuts(app: &AppHandle) -> Result<(), String> {
     let default_bindings = settings::get_default_settings().bindings;
     let user_settings = settings::load_or_create_app_settings(app);
 
-    // Collect all bindings upfront and register them in a single
-    // bind_shortcuts call. This avoids multiple compositor confirmation
-    // dialogs -- the user only sees one prompt for all shortcuts.
+    // Collect all bindings and register them in a single bind_shortcuts
+    // call. The portal API is declarative -- each call replaces the full
+    // set, so individual registration would cause earlier shortcuts to be
+    // overwritten. KDE shows one confirmation dialog for all new shortcuts
+    // on first launch, then remembers them for subsequent launches (as
+    // long as the app_id is stable).
     let mut initial_bindings = Vec::new();
     for (id, default_binding) in default_bindings {
         if id == "transcribe_with_post_process" && !user_settings.post_process_enabled {
